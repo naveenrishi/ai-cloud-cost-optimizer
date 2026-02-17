@@ -1,0 +1,237 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// User Model
+model User {
+  id                String   @id @default(uuid())
+  email             String   @unique
+  name              String
+  passwordHash      String   @map("password_hash")
+  role              Role     @default(USER)
+  subscriptionTier  Tier     @default(FREE) @map("subscription_tier")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  cloudAccounts     CloudAccount[]
+  budgets          Budget[]
+  alerts           Alert[]
+
+  @@map("users")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+enum Tier {
+  FREE
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+// Cloud Account Model
+model CloudAccount {
+  id                  String   @id @default(uuid())
+  userId              String   @map("user_id")
+  provider            Provider
+  accountId           String   @map("account_id")
+  accountName         String?  @map("account_name")
+  credentialsEncrypted String  @map("credentials_encrypted")
+  isDemo              Boolean  @default(true) @map("is_demo")
+  lastSyncedAt        DateTime? @map("last_synced_at")
+  status              AccountStatus @default(ACTIVE)
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  costData            CostData[]
+  recommendations     Recommendation[]
+  deletions           ResourceDeletion[]
+  safetyRules         DeletionSafetyRule[]
+
+  @@map("cloud_accounts")
+}
+
+enum Provider {
+  AWS
+  AZURE
+  GCP
+}
+
+enum AccountStatus {
+  ACTIVE
+  ERROR
+  DISCONNECTED
+}
+
+// Cost Data Model
+model CostData {
+  id              String   @id @default(uuid())
+  cloudAccountId  String   @map("cloud_account_id")
+  date            DateTime @db.Date
+  service         String
+  region          String
+  costAmount      Decimal  @db.Decimal(10, 2) @map("cost_amount")
+  currency        String   @default("USD")
+  tags            Json?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  cloudAccount    CloudAccount @relation(fields: [cloudAccountId], references: [id], onDelete: Cascade)
+
+  @@index([cloudAccountId, date])
+  @@index([service])
+  @@map("cost_data")
+}
+
+// Recommendation Model
+model Recommendation {
+  id                  String   @id @default(uuid())
+  cloudAccountId      String   @map("cloud_account_id")
+  resourceId          String   @map("resource_id")
+  type                RecommendationType
+  title               String
+  description         String   @db.Text
+  estimatedSavings    Decimal  @db.Decimal(10, 2) @map("estimated_savings")
+  priority            Priority @default(MEDIUM)
+  status              RecommendationStatus @default(PENDING)
+  implementationSteps Json?    @map("implementation_steps")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  cloudAccount        CloudAccount @relation(fields: [cloudAccountId], references: [id], onDelete: Cascade)
+  deletions           ResourceDeletion[]
+
+  @@map("recommendations")
+}
+
+enum RecommendationType {
+  RIGHT_SIZE
+  DELETE_IDLE
+  RESERVED_INSTANCE
+  SPOT_INSTANCE
+  STORAGE_OPTIMIZATION
+}
+
+enum Priority {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum RecommendationStatus {
+  PENDING
+  IMPLEMENTED
+  DISMISSED
+}
+
+// Resource Deletion Model (NEW - for nuke tracking)
+model ResourceDeletion {
+  id                  String   @id @default(uuid())
+  cloudAccountId      String   @map("cloud_account_id")
+  resourceId          String   @map("resource_id")
+  resourceType        String   @map("resource_type")
+  resourceName        String?  @map("resource_name")
+  deletedAt           DateTime @map("deleted_at")
+  deletedBy           String?  @map("deleted_by")
+  deletionMethod      DeletionMethod @map("deletion_method")
+  recommendationId    String?  @map("recommendation_id")
+  monthlyCostBefore   Decimal? @db.Decimal(10, 2) @map("monthly_cost_before")
+  estimatedSavings    Decimal? @db.Decimal(10, 2) @map("estimated_savings")
+  resourceMetadata    Json?    @map("resource_metadata")
+  deletionReason      String?  @db.Text @map("deletion_reason")
+  protectionStatus    ProtectionStatus @default(NONE) @map("protection_status")
+  createdAt           DateTime @default(now()) @map("created_at")
+
+  cloudAccount        CloudAccount @relation(fields: [cloudAccountId], references: [id], onDelete: Cascade)
+  recommendation      Recommendation? @relation(fields: [recommendationId], references: [id])
+
+  @@index([cloudAccountId, deletedAt])
+  @@index([resourceType])
+  @@map("resource_deletions")
+}
+
+enum DeletionMethod {
+  MANUAL
+  AUTOMATED
+  RECOMMENDATION
+}
+
+enum ProtectionStatus {
+  NONE
+  PROTECTED
+  CRITICAL
+}
+
+// Deletion Safety Rules (NEW)
+model DeletionSafetyRule {
+  id                String   @id @default(uuid())
+  cloudAccountId    String   @map("cloud_account_id")
+  ruleName          String   @map("rule_name")
+  resourceType      String?  @map("resource_type")
+  tagFilters        Json?    @map("tag_filters")
+  requireApproval   Boolean  @default(false) @map("require_approval")
+  approvers         Json?
+  active            Boolean  @default(true)
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  cloudAccount      CloudAccount @relation(fields: [cloudAccountId], references: [id], onDelete: Cascade)
+
+  @@map("deletion_safety_rules")
+}
+
+// Alert Model
+model Alert {
+  id              String   @id @default(uuid())
+  userId          String   @map("user_id")
+  cloudAccountId  String?  @map("cloud_account_id")
+  type            AlertType
+  thresholdAmount Decimal? @db.Decimal(10, 2) @map("threshold_amount")
+  currentAmount   Decimal? @db.Decimal(10, 2) @map("current_amount")
+  message         String   @db.Text
+  triggeredAt     DateTime @default(now()) @map("triggered_at")
+  resolvedAt      DateTime? @map("resolved_at")
+  acknowledged    Boolean  @default(false)
+
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("alerts")
+}
+
+enum AlertType {
+  BUDGET_THRESHOLD
+  ANOMALY
+  SPIKE
+  DELETION_PROTECTION
+}
+
+// Budget Model
+model Budget {
+  id                String   @id @default(uuid())
+  userId            String   @map("user_id")
+  cloudAccountId    String?  @map("cloud_account_id")
+  name              String
+  amount            Decimal  @db.Decimal(10, 2)
+  period            Period   @default(MONTHLY)
+  alertThresholds   Json     @map("alert_thresholds")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("budgets")
+}
+
+enum Period {
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
