@@ -6,3 +6,15 @@
       "VITE_API_URL": "https://disciplined-transformation-production-0f1d.up.railway.app"
     }
   }
+
+  {
+    "rewrites": [
+      {
+        "source": "/(.*)",
+        "destination": "/index.html"
+      }
+    ],
+    "env": {
+      "VITE_API_URL": "https://disciplined-transformation-production-0f1d.up.railway.app"
+    }
+  }
